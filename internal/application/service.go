@@ -36,8 +36,15 @@ func (s *Service) AddRevisionIdempotent(id string, r *domain.Revision, expected 
 		return nil, fmt.Errorf("%w: 修订不能为空", domain.ErrInvalid)
 	}
 	key = strings.TrimSpace(key)
-	digest := domain.RevisionRequestDigest(id, expected, r)
-	contentHash := domain.RevisionContentHash(r)
+	// Work on a deep copy so a failed transaction (e.g. event-log write error)
+	// cannot leak persisted fields, normalized station text, or idempotency
+	// metadata back into the caller's Revision. The copy also isolates the
+	// digest/content-hash computations, which normalize station/leg text in
+	// place. On success the stored revision is copied back below, preserving
+	// the existing post-commit behaviour.
+	clone := cloneRevision(r)
+	digest := domain.RevisionRequestDigest(id, expected, clone)
+	contentHash := domain.RevisionContentHash(clone)
 	var revisionID string
 	a, err := s.Store.Transact(id, "revision_created", func(candidate *domain.Archive) error {
 		if key != "" {
@@ -60,11 +67,11 @@ func (s *Service) AddRevisionIdempotent(id string, r *domain.Revision, expected 
 				return &domain.BusinessError{Cause: domain.ErrDuplicateContent, Code: "duplicate_revision_content", Message: "草稿中已存在相同内容的修订", ExistingRevisionID: existing.ID}
 			}
 		}
-		r.IdempotencyKey, r.RequestDigest = key, digest
-		if err := candidate.AddRevision(r, expected); err != nil {
+		clone.IdempotencyKey, clone.RequestDigest = key, digest
+		if err := candidate.AddRevision(clone, expected); err != nil {
 			return err
 		}
-		revisionID = r.ID
+		revisionID = clone.ID
 		return nil
 	})
 	if err != nil {
@@ -74,6 +81,24 @@ func (s *Service) AddRevisionIdempotent(id string, r *domain.Revision, expected 
 		*r = *stored
 	}
 	return a, nil
+}
+
+// cloneRevision returns a deep copy of r whose station and leg slices are
+// independent of the caller's underlying arrays, so mutating the copy inside a
+// transaction cannot pollute the caller's Revision when the transaction fails.
+func cloneRevision(r *domain.Revision) *domain.Revision {
+	out := *r
+	if r.Stations != nil {
+		out.Stations = append([]domain.Station(nil), r.Stations...)
+	} else {
+		out.Stations = nil
+	}
+	if r.Legs != nil {
+		out.Legs = append([]domain.Leg(nil), r.Legs...)
+	} else {
+		out.Legs = nil
+	}
+	return &out
 }
 func (s *Service) ValidateRevision(r *domain.Revision) domain.RevisionValidation {
 	return domain.ValidateRevision(r)
