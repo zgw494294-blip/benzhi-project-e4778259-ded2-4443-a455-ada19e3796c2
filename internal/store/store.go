@@ -236,18 +236,14 @@ func (s *Store) Update(a *domain.Archive) error {
 func (s *Store) List() []*domain.Archive {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	ids := make([]string, 0, len(s.archives))
+	for id := range s.archives {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
 	out := make([]*domain.Archive, 0, len(s.archives))
-	for _, archive := range s.archives {
-		projection := *archive
-		projection.Revisions = make(map[string]*domain.Revision, len(archive.Revisions))
-		for id, revision := range archive.Revisions {
-			if revision == nil {
-				continue
-			}
-			revisionCopy := *revision
-			projection.Revisions[id] = &revisionCopy
-		}
-		out = append(out, &projection)
+	for _, id := range ids {
+		out = append(out, cloneArchive(s.archives[id]))
 	}
 	return out
 }
