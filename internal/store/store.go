@@ -42,12 +42,25 @@ func New(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, err
 	}
-	f, err := os.Open(path)
+	if err := s.replay(); err != nil {
+		return nil, err
+	}
+	s.rebuildIndexes()
+	return s, nil
+}
+
+// replay re-reads the event log at s.path and re-establishes s.seq, s.prevHash
+// and the in-memory archive projections. It is used during initialization and
+// after detecting that the active log file has been rotated out from under
+// the cached writer handle.
+func (s *Store) replay() error {
+	s.seq, s.prevHash = 0, ""
+	f, err := os.Open(s.path)
 	if os.IsNotExist(err) {
-		return s, nil
+		return nil
 	}
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
@@ -56,12 +69,12 @@ func New(path string) (*Store, error) {
 	for scanner.Scan() {
 		var entry event
 		if json.Unmarshal(scanner.Bytes(), &entry) != nil || !schemaVersionValid(entry.SchemaVersion) || entry.Seq != expectedSeq+1 || entry.PrevHash != previous {
-			return nil, fmt.Errorf("事件日志校验失败")
+			return fmt.Errorf("事件日志校验失败")
 		}
 		stored := entry.Hash
 		entry.Hash = ""
 		if domain.Hash(entry) != stored {
-			return nil, fmt.Errorf("事件哈希链校验失败")
+			return fmt.Errorf("事件哈希链校验失败")
 		}
 		entry.Hash = stored
 		expectedSeq, previous = entry.Seq, entry.Hash
@@ -71,11 +84,7 @@ func New(path string) (*Store, error) {
 			s.archives[entry.Archive.ID] = entry.Archive
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	s.rebuildIndexes()
-	return s, nil
+	return scanner.Err()
 }
 
 func initialize(a *domain.Archive) {
@@ -120,9 +129,27 @@ func cloneArchive(a *domain.Archive) *domain.Archive {
 	return &out
 }
 
+// eventWriter returns a writable handle to the active event log at s.path.
+// If the cached handle is stale (the log was rotated out from under us and a
+// new file created at the same path), eventWriter closes the old handle,
+// replays the new log to re-anchor s.seq and s.prevHash, and opens a fresh
+// handle so subsequent writes land on the current active log.
 func (s *Store) eventWriter() (*os.File, error) {
 	if s.eventLog != nil {
-		return s.eventLog, nil
+		if same, err := s.sameInode(s.eventLog); err != nil || same {
+			if err == nil {
+				return s.eventLog, nil
+			}
+		}
+		// The cached handle no longer points at the active file. Close it and
+		// re-establish the sequence/hash chain from the current log so that
+		// the next event continues a valid chain within this log.
+		_ = s.eventLog.Close()
+		s.eventLog = nil
+		if err := s.replay(); err != nil {
+			return nil, err
+		}
+		s.rebuildIndexes()
 	}
 	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
@@ -132,14 +159,34 @@ func (s *Store) eventWriter() (*os.File, error) {
 	return f, nil
 }
 
+// sameInode reports whether the cached writer handle still references the file
+// currently located at s.path. When the log is rotated (renamed away and a new
+// file created at the same path), the inodes differ and the handle is stale.
+func (s *Store) sameInode(f *os.File) (bool, error) {
+	cached, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	current, err := os.Stat(s.path)
+	if err != nil {
+		// Path was removed entirely; treat as stale so the next OpenFile
+		// recreates it via O_CREATE.
+		return false, nil
+	}
+	return os.SameFile(cached, current), nil
+}
+
 func (s *Store) save(a *domain.Archive, typ string) error {
-	entry := event{SchemaVersion: currentSchemaVersion, Seq: s.seq + 1, Type: typ, Archive: a, PrevHash: s.prevHash}
-	entry.Hash = domain.Hash(entry)
 	if s.path != "" {
 		f, err := s.eventWriter()
 		if err != nil {
 			return err
 		}
+		// Resolve seq/prevHash after eventWriter, since a detected rotation
+		// re-anchors s.seq and s.prevHash from the current active log so the
+		// appended event continues a valid chain within that log.
+		entry := event{SchemaVersion: currentSchemaVersion, Seq: s.seq + 1, Type: typ, Archive: a, PrevHash: s.prevHash}
+		entry.Hash = domain.Hash(entry)
 		data, _ := json.Marshal(entry)
 		_, err = f.Write(append(data, '\n'))
 		if err == nil {
@@ -162,7 +209,11 @@ func (s *Store) save(a *domain.Archive, typ string) error {
 		if err := os.Rename(temporary, snapshot); err != nil {
 			return nil
 		}
+		s.seq, s.prevHash = entry.Seq, entry.Hash
+		return nil
 	}
+	entry := event{SchemaVersion: currentSchemaVersion, Seq: s.seq + 1, Type: typ, Archive: a, PrevHash: s.prevHash}
+	entry.Hash = domain.Hash(entry)
 	s.seq, s.prevHash = entry.Seq, entry.Hash
 	return nil
 }
