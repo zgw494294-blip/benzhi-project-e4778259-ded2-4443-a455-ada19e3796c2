@@ -123,6 +123,14 @@ func (s *Store) save(a *domain.Archive, typ string) error {
 	entry := event{SchemaVersion: currentSchemaVersion, Seq: s.seq + 1, Type: typ, Archive: a, PrevHash: s.prevHash}
 	entry.Hash = domain.Hash(entry)
 	if s.path != "" {
+		info, err := os.Stat(s.path)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		var before int64
+		if err == nil {
+			before = info.Size()
+		}
 		f, err := os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return err
@@ -139,11 +147,21 @@ func (s *Store) save(a *domain.Archive, typ string) error {
 		if err != nil {
 			return err
 		}
+		prevSeq, prevHash := s.seq, s.prevHash
+		rollback := func() {
+			_ = os.Truncate(s.path, before)
+			if tf, terr := os.OpenFile(s.path, os.O_WRONLY, 0644); terr == nil {
+				_ = tf.Sync()
+				_ = tf.Close()
+			}
+			s.seq, s.prevHash = prevSeq, prevHash
+		}
 		s.seq, s.prevHash = entry.Seq, entry.Hash
 		snapshot := s.path + ".snapshot"
 		temporary := snapshot + ".tmp"
 		projection, _ := json.Marshal(a)
 		if err := os.WriteFile(temporary, projection, 0644); err != nil {
+			rollback()
 			return err
 		}
 		if f, err := os.OpenFile(temporary, os.O_WRONLY, 0644); err == nil {
@@ -151,6 +169,7 @@ func (s *Store) save(a *domain.Archive, typ string) error {
 			_ = f.Close()
 		}
 		if err := os.Rename(temporary, snapshot); err != nil {
+			rollback()
 			return err
 		}
 	}
