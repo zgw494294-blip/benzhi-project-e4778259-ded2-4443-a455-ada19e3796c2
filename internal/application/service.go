@@ -694,7 +694,7 @@ func (s *Service) DifferenceReport(id string) (DifferenceReport, error) {
 	s.differenceMu.Lock()
 	if cached, ok := s.differenceCache[id]; ok && cached.revisionID == r.ID {
 		s.differenceMu.Unlock()
-		return cached.report, nil
+		return cloneDifferenceReport(cached.report), nil
 	}
 	s.differenceMu.Unlock()
 	out := DifferenceReport{Differences: []Difference{}, Entities: []EntityDifference{}}
@@ -787,7 +787,32 @@ func (s *Service) DifferenceReport(id string) (DifferenceReport, error) {
 	out.AffectedStations = out.AddedStations + out.DeletedStations + out.ModifiedStations
 	out.AffectedLegs = out.AddedLegs + out.DeletedLegs + out.ModifiedLegs
 	s.differenceMu.Lock()
-	s.differenceCache[id] = differenceCacheEntry{revisionID: r.ID, report: out}
+	s.differenceCache[id] = differenceCacheEntry{revisionID: r.ID, report: cloneDifferenceReport(out)}
 	s.differenceMu.Unlock()
 	return out, nil
+}
+
+// cloneDifferenceReport returns a deep copy of the report whose slice headers
+// and backing arrays are independent from the source. Callers may freely
+// mutate the returned Differences, Entities and per-entity Fields without
+// affecting the canonical report stored in the difference cache. Before/After
+// values are immutable primitives (string/int/float64), so a shallow copy of
+// each Difference is sufficient.
+func cloneDifferenceReport(r DifferenceReport) DifferenceReport {
+	out := r
+	if r.Differences != nil {
+		out.Differences = append([]Difference(nil), r.Differences...)
+	}
+	if r.Entities == nil {
+		return out
+	}
+	entities := make([]EntityDifference, len(r.Entities))
+	for i, e := range r.Entities {
+		entities[i] = e
+		if e.Fields != nil {
+			entities[i].Fields = append([]Difference(nil), e.Fields...)
+		}
+	}
+	out.Entities = entities
+	return out
 }
