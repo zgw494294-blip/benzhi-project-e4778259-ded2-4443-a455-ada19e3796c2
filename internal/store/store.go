@@ -238,7 +238,16 @@ func (s *Store) List() []*domain.Archive {
 	defer s.mu.RUnlock()
 	out := make([]*domain.Archive, 0, len(s.archives))
 	for _, archive := range s.archives {
-		out = append(out, cloneArchive(archive))
+		projection := *archive
+		projection.Revisions = make(map[string]*domain.Revision, len(archive.Revisions))
+		for id, revision := range archive.Revisions {
+			if revision == nil {
+				continue
+			}
+			revisionCopy := *revision
+			projection.Revisions[id] = &revisionCopy
+		}
+		out = append(out, &projection)
 	}
 	return out
 }
