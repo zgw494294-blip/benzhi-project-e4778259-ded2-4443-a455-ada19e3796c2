@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>洞穴测绘归档验收工作台</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>洞穴测绘归档验收工作台</h1>
+    <button id="refresh" type="button">刷新</button>
+  </header>
+  <main>
+    <section class="panel compact">
+      <h2>创建归档包</h2>
+      <form id="create">
+        <input name="archiveCode" placeholder="归档编号" required>
+        <input name="caveName" placeholder="洞穴名称" required>
+        <input name="surveyDate" type="date" required>
+        <input name="coordinateDatum" placeholder="坐标基准" required>
+        <button>创建</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>归档包总览</h2>
+      <form id="filters">
+        <input name="keyword" placeholder="归档编号或洞穴名称">
+        <select name="status">
+          <option value="">全部状态</option>
+          <option value="draft">草稿待录入</option>
+          <option value="pending_check">待质检</option>
+          <option value="reviewing">校审中</option>
+          <option value="rework">校审返修</option>
+          <option value="freezable">可冻结</option>
+          <option value="frozen">已冻结</option>
+          <option value="accepted">已验收</option>
+        </select>
+        <input name="from" type="date">
+        <input name="to" type="date">
+        <button>筛选</button>
+      </form>
+      <div id="summary"></div>
+      <div id="risks"></div>
+      <div id="counts"></div>
+      <div id="archives">加载中...</div>
+      <nav id="pager"></nav>
+    </section>
+
+    <section class="panel" id="revision-panel" hidden>
+      <div class="section-title">
+        <h2>修订表格导入</h2>
+        <span id="revision-context"></span>
+      </div>
+      <form id="revision-import" class="stack">
+        <div class="table-inputs">
+          <label>测站表格<textarea name="stationTable" rows="8" placeholder="id,name,x,y,z" required></textarea></label>
+          <label>测段表格<textarea name="legTable" rows="8" placeholder="id,from,to,distance,azimuth,inclination" required></textarea></label>
+        </div>
+        <div class="form-row">
+          <input name="submittedBy" placeholder="提交者" required>
+          <input name="changeSummary" placeholder="变更说明">
+          <input name="parentRevisionId" placeholder="父修订 ID">
+          <button type="button" id="precheck">预检</button>
+          <button id="confirm-revision" disabled>确认创建修订</button>
+        </div>
+      </form>
+      <div id="precheck-result" class="result-region"></div>
+    </section>
+
+    <section class="panel" id="comparison-panel" hidden>
+      <div class="section-title">
+        <h2>返修复验发现对照</h2>
+        <span id="comparison-summary"></span>
+      </div>
+      <form id="comparison-filters">
+        <input name="checkRunId" placeholder="当前 checkRunId" required>
+        <select name="category">
+          <option value="">全部分类</option>
+          <option value="resolved">已解决</option>
+          <option value="still_exists">仍存在</option>
+          <option value="new">本次新增</option>
+        </select>
+        <select name="severity">
+          <option value="">全部严重度</option>
+          <option value="error">错误</option>
+          <option value="warning">警告</option>
+        </select>
+        <input name="ruleCode" placeholder="规则代码">
+        <button>查询对照</button>
+      </form>
+      <div id="comparison-result" class="result-region"></div>
+      <form id="finding-decision" class="decision-row" hidden>
+        <strong id="decision-finding"></strong>
+        <select name="decision" required>
+          <option value="">选择裁决</option>
+          <option value="rectify">整改</option>
+          <option value="waive">豁免</option>
+        </select>
+        <input name="reason" placeholder="裁决理由" required>
+        <input name="reviewer" placeholder="校审员" required>
+        <input name="secondReviewer" placeholder="二次复核人">
+        <button>提交裁决</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>验收凭据批量核验</h2>
+      <form id="certificate-batch" class="stack">
+        <textarea name="certificateIds" rows="5" placeholder="每行一个凭据编号" required></textarea>
+        <div><button>批量核验</button></div>
+      </form>
+      <div id="certificate-summary"></div>
+      <div id="certificate-result" class="result-region"></div>
+    </section>
+
+    <section class="panel">
+      <h2>归档详情</h2>
+      <pre id="detail">请选择归档包</pre>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
