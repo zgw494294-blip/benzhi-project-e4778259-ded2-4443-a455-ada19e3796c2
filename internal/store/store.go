@@ -184,13 +184,13 @@ func (s *Store) CreateChecked(a *domain.Archive, key, digest string) (*domain.Ar
 	candidate := cloneArchive(a)
 	candidate.CreateIdempotencyKey = key
 	candidate.CreateRequestDigest = digest
-	if err := s.save(candidate, "create"); err != nil {
-		return nil, false, err
-	}
 	s.archives[candidate.ID] = candidate
 	s.codeIndex[normalizedCode] = candidate.ID
 	if key != "" {
 		s.idem["create:"+key] = candidate.ID
+	}
+	if err := s.save(candidate, "create"); err != nil {
+		return nil, false, err
 	}
 	return candidate, false, nil
 }
