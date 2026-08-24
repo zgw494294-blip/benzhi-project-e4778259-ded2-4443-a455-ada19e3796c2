@@ -144,14 +144,14 @@ func (s *Store) save(a *domain.Archive, typ string) error {
 		temporary := snapshot + ".tmp"
 		projection, _ := json.Marshal(a)
 		if err := os.WriteFile(temporary, projection, 0644); err != nil {
-			return nil
+			return err
 		}
 		if f, err := os.OpenFile(temporary, os.O_WRONLY, 0644); err == nil {
 			_ = f.Sync()
 			_ = f.Close()
 		}
 		if err := os.Rename(temporary, snapshot); err != nil {
-			return nil
+			return err
 		}
 	}
 	s.seq, s.prevHash = entry.Seq, entry.Hash
