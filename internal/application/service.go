@@ -99,6 +99,14 @@ func (s *Service) CheckVersion(id string, expected int, ruleSetVersion string) (
 			if run.RevisionID != r.ID || run.RuleSetVersion != ruleSetVersion || run.InputHash != inputHash {
 				continue
 			}
+			if expected == a.Version {
+				var e error
+				result, e = s.loadReusableCheckResult(id, run.ID)
+				if e != nil {
+					return e
+				}
+				return store.ErrNoChange
+			}
 			findings := findingsForRun(a, run)
 			if !runConsistent(a, run, findings) {
 				return &domain.BusinessError{Cause: domain.ErrDigestMismatch, Code: "check_run_digest_mismatch", Message: "质检运行摘要不一致"}
@@ -140,6 +148,24 @@ func findingsForRun(a *domain.Archive, run *domain.CheckRun) []*domain.Finding {
 func runConsistent(a *domain.Archive, run *domain.CheckRun, findings []*domain.Finding) bool {
 	revision := a.Revisions[run.RevisionID]
 	return revision != nil && domain.CheckInputHash(revision, run.RuleSetVersion) == run.InputHash && domain.CheckRunConsistent(run, findings)
+}
+
+func (s *Service) loadReusableCheckResult(archiveID, runID string) (*checker.Result, error) {
+	stored, err := s.Store.Get(archiveID)
+	if err != nil {
+		return nil, err
+	}
+	run := stored.CheckRuns[runID]
+	if run == nil {
+		return nil, domain.ErrNotFound
+	}
+	findings := findingsForRun(stored, run)
+	if !runConsistent(stored, run, findings) {
+		return nil, &domain.BusinessError{Cause: domain.ErrDigestMismatch, Code: "check_run_digest_mismatch", Message: "质检运行摘要不一致"}
+	}
+	copy := *run
+	copy.Consistent = true
+	return &checker.Result{CheckRunID: copy.ID, Run: &copy, Findings: findings, Reused: true}, nil
 }
 
 func (s *Service) CheckRun(id, runID string) (*domain.CheckRun, error) {
