@@ -29,6 +29,7 @@ type Store struct {
 	codeIndex map[string]string
 	idem      map[string]any
 	path      string
+	eventLog  *os.File
 	seq       int64
 	prevHash  string
 }
@@ -119,11 +120,23 @@ func cloneArchive(a *domain.Archive) *domain.Archive {
 	return &out
 }
 
+func (s *Store) eventWriter() (*os.File, error) {
+	if s.eventLog != nil {
+		return s.eventLog, nil
+	}
+	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, err
+	}
+	s.eventLog = f
+	return f, nil
+}
+
 func (s *Store) save(a *domain.Archive, typ string) error {
 	entry := event{SchemaVersion: currentSchemaVersion, Seq: s.seq + 1, Type: typ, Archive: a, PrevHash: s.prevHash}
 	entry.Hash = domain.Hash(entry)
 	if s.path != "" {
-		f, err := os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		f, err := s.eventWriter()
 		if err != nil {
 			return err
 		}
@@ -131,10 +144,6 @@ func (s *Store) save(a *domain.Archive, typ string) error {
 		_, err = f.Write(append(data, '\n'))
 		if err == nil {
 			err = f.Sync()
-		}
-		closeErr := f.Close()
-		if err == nil {
-			err = closeErr
 		}
 		if err != nil {
 			return err
