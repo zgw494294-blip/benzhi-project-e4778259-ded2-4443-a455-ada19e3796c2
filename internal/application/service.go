@@ -7,12 +7,25 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
-type Service struct{ Store *store.Store }
+type differenceCacheEntry struct {
+	revisionID string
+	report     DifferenceReport
+}
 
-func New(s *store.Store) *Service { return &Service{Store: s} }
+type Service struct {
+	Store *store.Store
+
+	differenceMu    sync.Mutex
+	differenceCache map[string]differenceCacheEntry
+}
+
+func New(s *store.Store) *Service {
+	return &Service{Store: s, differenceCache: map[string]differenceCacheEntry{}}
+}
 func (s *Service) Create(code, cave, date, datum, key string) (*domain.Archive, error) {
 	a, e := domain.NewArchive(code, cave, date, datum)
 	if e != nil {
@@ -678,6 +691,12 @@ func (s *Service) DifferenceReport(id string) (DifferenceReport, error) {
 	if p == nil {
 		return DifferenceReport{Differences: []Difference{}, Entities: []EntityDifference{}}, nil
 	}
+	s.differenceMu.Lock()
+	if cached, ok := s.differenceCache[id]; ok && cached.revisionID == r.ID {
+		s.differenceMu.Unlock()
+		return cached.report, nil
+	}
+	s.differenceMu.Unlock()
 	out := DifferenceReport{Differences: []Difference{}, Entities: []EntityDifference{}}
 	pm := map[string]domain.Station{}
 	rm := map[string]domain.Station{}
@@ -767,5 +786,8 @@ func (s *Service) DifferenceReport(id string) (DifferenceReport, error) {
 	})
 	out.AffectedStations = out.AddedStations + out.DeletedStations + out.ModifiedStations
 	out.AffectedLegs = out.AddedLegs + out.DeletedLegs + out.ModifiedLegs
+	s.differenceMu.Lock()
+	s.differenceCache[id] = differenceCacheEntry{revisionID: r.ID, report: out}
+	s.differenceMu.Unlock()
 	return out, nil
 }
